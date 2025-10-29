@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import nextPlugin from "@next/eslint-plugin-next";
 import jestPlugin from "eslint-plugin-jest";
 
-export default [
+const config = [
   {
     files: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
     ignores: ["node_modules", ".next", "dist"],
@@ -21,3 +21,5 @@ export default [
     },
   },
 ];
+
+export default config;
