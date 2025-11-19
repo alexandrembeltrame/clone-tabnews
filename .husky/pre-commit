@@ -1,0 +1,126 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "🔍 Verificando dados sensíveis..."
+
+# Extensões de arquivos que NUNCA devem ser commitados
+BLOCKED_EXTENSIONS="\.pem$|\.key$|\.p12$|\.pfx$|\.jks$|\.keystore$|\.cer$|\.crt$|\.der$"
+
+# Nomes de arquivos sensíveis (regex)
+BLOCKED_FILENAMES="^\.env$|^\.env\.local$|^\.env\.production$|credentials|secret|private.*key|id_rsa|id_dsa"
+
+# Lista de padrões para detectar dados sensíveis no CONTEÚDO
+PATTERNS=(
+  # Chaves de API e Tokens (qualquer variável com key/token/secret)
+  "['\"]?[A-Z_]*[Kk][Ee][Yy]['\"]?\s*[:=]\s*['\"][a-zA-Z0-9_\-]{20,}['\"]"
+  "['\"]?[A-Z_]*[Tt][Oo][Kk][Ee][Nn]['\"]?\s*[:=]\s*['\"][a-zA-Z0-9_\-]{20,}['\"]"
+  "['\"]?[A-Z_]*[Ss][Ee][Cc][Rr][Ee][Tt]['\"]?\s*[:=]\s*['\"][a-zA-Z0-9_\-]{16,}['\"]"
+  
+  # AWS
+  "AKIA[0-9A-Z]{16}"
+  "aws[_-]?access[_-]?key[_-]?id['\"]?\s*[:=]\s*['\"][A-Z0-9]{20}['\"]"
+  "aws[_-]?secret[_-]?access[_-]?key['\"]?\s*[:=]\s*['\"][A-Za-z0-9/+=]{40}['\"]"
+  
+  # Senhas (qualquer variável com password/passwd/pwd)
+  "['\"]?[A-Z_]*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]['\"]?\s*[:=]\s*['\"][^'\"]{6,}['\"]"
+  "['\"]?[A-Z_]*[Pp][Aa][Ss][Ss][Ww][Dd]['\"]?\s*[:=]\s*['\"][^'\"]{6,}['\"]"
+  
+  # Database URLs com credenciais
+  "mongodb(\+srv)?://[^:]+:[^@]+@"
+  "postgresql://[^:]+:[^@]+@"
+  "mysql://[^:]+:[^@]+@"
+  "postgres://[^:]+:[^@]+@"
+  
+  # Private Keys
+  "-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----"
+  
+  # JWT Tokens (formato completo)
+  "eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}"
+  
+  # GitHub Tokens
+  "gh[pousr]_[0-9a-zA-Z]{36}"
+  "github_pat_[0-9a-zA-Z_]{82}"
+  
+  # Slack Tokens
+  "xox[baprs]-[0-9a-zA-Z-]+"
+  
+  # Google API
+  "AIza[0-9A-Za-z_-]{35}"
+  
+  # Stripe
+  "sk_live_[0-9a-zA-Z]{24,}"
+  "pk_live_[0-9a-zA-Z]{24,}"
+  
+  # Heroku
+  "heroku[_-]?api[_-]?key['\"]?\s*[:=]\s*['\"][0-9a-f-]{36}['\"]"
+  
+  # Tokens genéricos (32+ caracteres alfanuméricos)
+  "['\"][a-zA-Z0-9_\-]{32,}['\"]"
+)
+
+# Arquivos/pastas a serem ignorados na verificação de conteúdo
+IGNORED_PATTERNS=".env.example|.env.sample|.env.template|.husky|node_modules|package-lock.json|yarn.lock|pnpm-lock.yaml"
+
+# Obter arquivos staged
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED_FILES" ]; then
+  echo "✅ Nenhum arquivo para verificar"
+  exit 0
+fi
+
+FOUND_SENSITIVE=0
+
+# 1. Verificar extensões de arquivo bloqueadas
+echo "Verificando extensões de arquivo..."
+for file in $STAGED_FILES; do
+  if echo "$file" | grep -qiE "$BLOCKED_EXTENSIONS"; then
+    echo "❌ ERRO: Arquivo com extensão sensível detectado: $file"
+    echo "   Extensões de certificados/chaves privadas não devem ser commitadas"
+    FOUND_SENSITIVE=1
+  fi
+done
+
+# 2. Verificar nomes de arquivos sensíveis
+echo "Verificando nomes de arquivo..."
+for file in $STAGED_FILES; do
+  filename=$(basename "$file")
+  if echo "$filename" | grep -qiE "$BLOCKED_FILENAMES"; then
+    if echo "$file" | grep -qvE "$IGNORED_PATTERNS"; then
+      echo "❌ ERRO: Arquivo sensível detectado: $file"
+      echo "   Este tipo de arquivo não deve ser commitado"
+      FOUND_SENSITIVE=1
+    fi
+  fi
+done
+
+# 3. Verificar conteúdo dos arquivos
+echo "Verificando conteúdo dos arquivos..."
+for file in $STAGED_FILES; do
+  # Ignorar arquivos binários e arquivos da lista de ignorados
+  if [ -f "$file" ] && file "$file" | grep -q text && ! echo "$file" | grep -qE "$IGNORED_PATTERNS"; then
+    for pattern in "${PATTERNS[@]}"; do
+      if grep -qE "$pattern" "$file" 2>/dev/null; then
+        echo "❌ AVISO: Possível dado sensível detectado em: $file"
+        FOUND_SENSITIVE=1
+        break
+      fi
+    done
+  fi
+done
+
+if [ $FOUND_SENSITIVE -eq 1 ]; then
+  echo ""
+  echo "⛔ COMMIT BLOQUEADO!"
+  echo "   Dados sensíveis foram detectados."
+  echo ""
+  echo "💡 Dicas:"
+  echo "   - Use variáveis de ambiente (.env) para dados sensíveis"
+  echo "   - Adicione arquivos sensíveis ao .gitignore"
+  echo "   - Nunca commite chaves, senhas ou tokens no código"
+  echo "   - Use .env.example com valores fake para documentação"
+  exit 1
+fi
+
+echo "✅ Nenhum dado sensível detectado"
+exit 0
