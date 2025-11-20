@@ -1,6 +1,4 @@
 #!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
-
 echo "🔍 Verificando dados sensíveis..."
 
 # Extensões de arquivos que NUNCA devem ser commitados
